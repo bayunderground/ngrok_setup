@@ -113,6 +113,19 @@ run_check() {
     return 1
 }
 
+run_status() {
+    local state unit
+    state="$(python3 "$PROJECT_DIR/scripts/ngrok-endpoint.py" --status || true)"
+    echo "${state:-state=unknown}"
+    if [[ -n "$ROOT_PREFIX" ]]; then
+        echo "units: skipped (test root)"
+        return 0
+    fi
+    for unit in ngrok-ssh.service ngrok-ssh-recover.timer ngrok-ssh-notify.timer; do
+        echo "unit $unit: $(systemctl is-active "$unit" 2>/dev/null || true)"
+    done
+}
+
 parse_args() {
     local positional=()
     while [[ $# -gt 0 ]]; do
@@ -135,7 +148,8 @@ main() {
     parse_args "$@"
     case "$COMMAND" in
         check) run_check ;;
-        status|install|uninstall)
+        status) run_status ;;
+        install|uninstall)
             echo "error: '$COMMAND' is not implemented yet" >&2
             exit 2 ;;
         *) echo "error: unknown command '$COMMAND'" >&2; usage >&2; exit 2 ;;
