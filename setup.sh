@@ -126,6 +126,133 @@ run_status() {
     done
 }
 
+HOME_DIR=""
+LIB_DIR="usr/local/lib/ngrok-ssh"
+SCRIPT_FILES=(
+    scripts/ngrok-endpoint.py
+    scripts/ngrok_notify_state.py
+    scripts/ngrok_notify_telegram.py
+    scripts/ngrok_notify_check.py
+    scripts/ngrok_recover.py
+)
+UNIT_FILES=(
+    ngrok-ssh.service
+    ngrok-ssh-recover.service
+    ngrok-ssh-recover.timer
+    ngrok-ssh-notify.service
+    ngrok-ssh-notify.timer
+)
+ENABLED_UNITS=(ngrok-ssh.service ngrok-ssh-recover.timer ngrok-ssh-notify.timer)
+DISPATCHER_FILE="etc/NetworkManager/dispatcher.d/50-ngrok-ssh"
+
+is_test_root() {
+    [[ -n "$ROOT_PREFIX" ]]
+}
+
+resolve_home() {
+    HOME_DIR="${NGROK_SSH_HOME:-$(getent passwd "$TARGET_USER" | cut -d: -f6)}"
+}
+
+install_file() {
+    local src="$1" dest="$2" mode="$3"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "would install $dest"
+        return 0
+    fi
+    mkdir -p "$(dirname "$dest")"
+    install -m "$mode" "$src" "$dest.new"
+    mv -f "$dest.new" "$dest"
+    echo "installed $dest"
+}
+
+telegram_env_file() {
+    echo "$HOME_DIR/.config/ngrok-ssh/telegram.env"
+}
+
+ensure_telegram_env() {
+    local dest
+    dest="$(telegram_env_file)"
+    if [[ -f "$dest" ]]; then
+        echo "kept existing $dest"
+        return 0
+    fi
+    if [[ ! -f "$PROJECT_DIR/.env" ]]; then
+        echo "error: no $dest and no $PROJECT_DIR/.env to create it from" >&2
+        return 1
+    fi
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "would create $dest (mode 600) from TELEGRAM_* keys in .env"
+        return 0
+    fi
+    mkdir -p "$(dirname "$dest")"
+    (
+        umask 077
+        grep -E '^TELEGRAM_(BOT_TOKEN|CHAT_ID)=' "$PROJECT_DIR/.env" > "$dest.new" || true
+    )
+    if [[ "$(wc -l < "$dest.new")" -ne 2 ]]; then
+        rm -f "$dest.new"
+        echo "error: .env must define TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID" >&2
+        return 1
+    fi
+    mv -f "$dest.new" "$dest"
+    if ! is_test_root; then
+        chown "$TARGET_USER:$TARGET_USER" "$dest"
+    fi
+    echo "created $dest (mode 600)"
+}
+
+verify_units() {
+    if ! command -v systemd-analyze >/dev/null 2>&1; then
+        echo "warning: systemd-analyze not found; unit syntax not verified" >&2
+        return 0
+    fi
+    local paths=()
+    local unit
+    for unit in "${UNIT_FILES[@]}"; do
+        paths+=("$PROJECT_DIR/systemd/$unit")
+    done
+    systemd-analyze verify "${paths[@]}"
+}
+
+install_payload() {
+    local lib="$ROOT_PREFIX/$LIB_DIR" file
+    for file in "${SCRIPT_FILES[@]}"; do
+        install_file "$PROJECT_DIR/$file" "$lib/$file" 0755
+    done
+    install_file "$PROJECT_DIR/config/ngrok-ssh.yml" "$lib/config/ngrok-ssh.yml" 0644
+    for file in "${UNIT_FILES[@]}"; do
+        install_file "$PROJECT_DIR/systemd/$file" "$ROOT_PREFIX/etc/systemd/system/$file" 0644
+    done
+    install_file "$PROJECT_DIR/dispatcher/50-ngrok-ssh" "$ROOT_PREFIX/$DISPATCHER_FILE" 0755
+}
+
+activate_units() {
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "would run systemctl daemon-reload and enable --now: ${ENABLED_UNITS[*]}"
+        return 0
+    fi
+    if is_test_root; then
+        echo "systemctl skipped (test root)"
+        return 0
+    fi
+    systemctl daemon-reload
+    systemctl enable --now "${ENABLED_UNITS[@]}"
+    echo "enabled: ${ENABLED_UNITS[*]}"
+}
+
+run_install() {
+    if [[ $DRY_RUN -eq 0 ]] && ! is_test_root && [[ $EUID -ne 0 ]]; then
+        echo "error: install must run as root (use sudo)" >&2
+        return 1
+    fi
+    resolve_home
+    run_check
+    verify_units
+    ensure_telegram_env
+    install_payload
+    activate_units
+}
+
 parse_args() {
     local positional=()
     while [[ $# -gt 0 ]]; do
@@ -149,8 +276,9 @@ main() {
     case "$COMMAND" in
         check) run_check ;;
         status) run_status ;;
-        install|uninstall)
-            echo "error: '$COMMAND' is not implemented yet" >&2
+        install) run_install ;;
+        uninstall)
+            echo "error: 'uninstall' is not implemented yet" >&2
             exit 2 ;;
         *) echo "error: unknown command '$COMMAND'" >&2; usage >&2; exit 2 ;;
     esac
