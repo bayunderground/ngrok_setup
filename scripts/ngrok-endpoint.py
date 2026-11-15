@@ -19,11 +19,24 @@ def active_endpoint():
     return None
 
 
-def main():
+def lookup():
     try:
-        endpoint = active_endpoint()
+        return active_endpoint(), None
     except OSError as exc:
-        print(f"ngrok agent API unreachable: {exc}", file=sys.stderr)
+        return None, f"agent API unreachable: {exc}"
+
+
+def main():
+    status = "--status" in sys.argv[1:]
+    endpoint, error = lookup()
+    if status:
+        if endpoint:
+            print(f"state=up endpoint={endpoint}")
+            return 0
+        print(f"state=down reason={error or 'no active TCP endpoint for port 22'}")
+        return 1
+    if error:
+        print(error, file=sys.stderr)
         return 2
     if not endpoint:
         print("no active TCP endpoint for port 22", file=sys.stderr)
