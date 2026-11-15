@@ -1,0 +1,14 @@
+# Secrets and local environment
+.env
+*.secret
+*.token
+
+# Runtime state and logs
+state/
+*.log
+
+# Editor and OS files
+.DS_Store
+*.swp
+.vscode/
+.idea/
