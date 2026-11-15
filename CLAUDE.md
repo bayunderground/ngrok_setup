@@ -10,7 +10,19 @@ The tunnel must start after boot and recover automatically after:
 - the default route changes;
 - ngrok exits or loses connectivity.
 
-The project must also include an **idempotent setup script** that can install the solution on a fresh, supported Raspberry Pi OS system. The setup script is a project deliverable, but do not run it against the development Pi without explicit authorization.
+The project must also include an **idempotent setup script** that can install the solution on a fresh, supported Raspberry Pi OS system. The setup script is a project deliverable. It has been run on `pi5home` with the user's authorization; any further install, uninstall, service restart, or VPN change on `pi5home` needs explicit authorization for that specific action.
+
+## Current status (2026-11-15)
+
+The project is implemented and installed on `pi5home`. Phase-by-phase status and the test matrix are in `DEVELOPMENT_PLAN.md`, sections 2 and 6.
+
+- Installed: `ngrok-ssh.service`, `ngrok-ssh-recover.timer`, `ngrok-ssh-notify.timer`, and the NetworkManager dispatcher hook `50-ngrok-ssh`. The tunnel is up.
+- Implemented and tested: `setup.sh check|status|install|uninstall` (`--dry-run`, `--user`), endpoint helper, recovery with debounce and lock, watchdog, Telegram notifier (state file, retries, 0600 credentials). 58 unit tests pass on the Pi.
+- Verified on the Pi: tunnel starts after reboot; crash (`SIGKILL`) is restarted by systemd; watchdog recovers a missing endpoint within about two minutes; a disabled service stays disabled; endpoint changes are announced in Telegram; Telegram works with the VPN on.
+- Not yet verified: Ethernet and Wi-Fi transitions; full VPN stop/start; real uninstall/reinstall on the Pi; clean install on a fresh Debian 13 arm64 system; automated ngrok binary install (not implemented).
+- Development happens on the Pi, in `~/ngrok_setup`. Commit after each major change and push with the Pi's deploy key. The deploy key has write access to this repository only.
+- Stop the tunnel with `sudo systemctl disable --now ngrok-ssh.service`. A plain `systemctl stop` is undone by the watchdog.
+- Do not ask for or record the sudo password. Installs use a cached `sudo -v` session that the user starts on the Pi.
 
 ## Current reference environment
 
@@ -84,7 +96,7 @@ The current `/etc/NetworkManager/dispatcher.d/90-android-vpn-share` script react
 - Use an ngrok **TCP** endpoint forwarding to the local SSH listener, preferably `127.0.0.1:22`.
 - `ngrok tcp 22` is the basic CLI form.
 - The installed CLI reports that a reserved TCP address is required for a stable public address and supports `--url=<reserved-host:port>`.
-- Confirm current ngrok account eligibility, TCP endpoint reservation, and CLI behavior during implementation. Do not assume a free plan supports the required TCP endpoint.
+- Confirmed on 2026-11-15: the free plan creates TCP endpoints (a temporary `ngrok tcp 22` received a random address). Reserved TCP addresses are still unavailable on the free plan, so the project does not use one.
 - Documentation check (ngrok docs, 2026-11-15): TCP endpoints are available on a free plan only after a valid payment method (credit/debit card, not prepaid; not charged on free tier) is added to the account. **Reserved TCP Addresses are not available on the free plan** (they are a paid-plan feature, billed per address). Free accounts get a randomly assigned hostname:port, which should be assumed to change whenever the endpoint is recreated. The ngrok FAQ says the agent is robust to network changes; whether the address survives an in-process reconnect versus an agent restart must be tested, not assumed. These are documentation findings; the actual account state is still unverified (user reports a free account; payment-method status unknown).
 - ngrok supports IP restriction both via CLI (`--cidr-allow`) and via an agent-config `endpoints:` entry (`url: tcp://<reserved-address>`, `upstream.url: 22`, `traffic_policy.on_tcp_connect` with `restrict-ips`). IP restriction is not used in this project (see Decisions); this note is kept only for the `endpoints:` config form, which on a free plan must use a random address (`tcp://`) rather than a reserved one. Verify against the installed agent version (3.39.10) before relying on it.
 - A setup script cannot create an account, accept terms, add a payment method, or reserve an endpoint on the user's behalf.
@@ -107,7 +119,7 @@ The discovered config file passed `ngrok config check`. The sanitized inspection
 4. Any small runtime helper(s), service unit(s), and dispatcher integration needed by the design.
 5. A concise README or usage section describing setup, configuration, status, logs, endpoint discovery, update, and uninstall.
 
-The current documentation task does not authorize implementation or installation. Do not change the development Pi unless the user explicitly asks.
+Changes to `pi5home` (installs, service changes, VPN toggles) need explicit authorization for each action. Do not stop, restart, or reconfigure Happ, the VPN gateway, or the Android-sharing setup as a side effect of testing.
 
 ## Setup script requirements
 
@@ -200,16 +212,23 @@ Never report a test as passed unless it was actually executed and its result rec
 - **Plan decision: free plan only.** The user wanted a static hostname, but a reserved TCP Address needs a paid plan and the user chose to stay free. The public address is therefore random (`tcp://` with no fixed address) and may change. Do not require or assume a reserved address. Keep the config able to accept an optional reserved address later, but implement and test the random-address mode.
 - **Change notification: Telegram.** The Pi sends the user a Telegram message whenever the public endpoint changes (and on first establishment). The user has a bot token and chat ID (values not shared in chat and must not be requested or logged).
 - Happ: the host runs Happ with the VPN on; the tunnel must work with it (compatibility is required, but Happ is still not installed/configured by this project, and the generic network recovery must not depend on Happ-specific names).
+- **Telegram credentials (2026-11-15):** the bot token and chat ID live in the repository's `.env` (gitignored, mode 600 on the Pi). `setup.sh install` copies only the two `TELEGRAM_*` keys to `~/.config/ngrok-ssh/telegram.env` (mode 600, owned by `bliss`). Reinstalls keep the existing file.
+- **Stop behaviour (2026-11-15):** recovery and the watchdog respect `systemctl disable`. The documented way to stop the tunnel is `systemctl disable --now ngrok-ssh.service`.
+- **Telegram with the VPN off:** not required (user decision, 2026-11-15). Telegram with the VPN on is verified.
+- **VPN-off measurements:** deferred by user decision (2026-11-15). Do not stop Happ for testing without a new explicit request.
 
-## Open questions (to resolve before implementation)
+## Open questions
 
 Record answers here as they are given; do not guess.
 
-1. (Likely resolved) The user reports the ngrok dashboard shows Identity Verification as Verified, which is the card verification TCP endpoints need on the free plan. Confirm by actually starting a TCP endpoint during Phase 0.
-2. (Resolved) Free plan only; changed addresses are delivered by Telegram.
-3. Is the existing `authtoken` in `/home/bliss/.config/ngrok/ngrok.yml` valid? (Verify with `ngrok config check` and a start attempt; never print it.)
-3. Telegram secrets storage: proposed design is a project-owned environment file readable only by `bliss` (mode 0600, outside any repository, never in unit files, process arguments, or logs), created by the setup script with prompts that do not echo the values. Confirm this is acceptable, or say if the existing token/chat ID are already stored somewhere (for example in another project's config) that should be reused.
-4. Is Telegram reachable from the Pi when the Happ VPN is on and when it is off? Test both; notifications must retry with backoff if it is not.
+1. **Resolved:** a TCP endpoint starts on the free plan (verified 2026-11-15).
+2. **Resolved:** free plan only; changed addresses are delivered by Telegram.
+3. **Resolved:** the authtoken in `/home/bliss/.config/ngrok/ngrok.yml` is valid. The agent starts and receives an endpoint. The token was never printed.
+4. **Resolved:** Telegram storage uses the 0600 file described above, created by `setup.sh install` without echoing values.
+5. **Partly resolved:** Telegram reachable with the VPN on: yes. With the VPN off: not tested, and not required by the user.
+6. **Open:** ngrok binary installation. `setup.sh` does not install ngrok. Choose an official, verifiable method (signed apt repository or a pinned, checksum-verified release) or keep it as a manual prerequisite.
+7. **Open:** Ethernet and Wi-Fi transition tests. Needs an explicit go-ahead and a rescue plan (physical access or a second network path) before running, because SSH may drop.
+8. **Open:** a fresh-system test. Needs a disposable Debian 13 arm64 system (VM or SD image) to run `check`, `install`, and `uninstall`.
 
 ## Telegram notification requirements
 
