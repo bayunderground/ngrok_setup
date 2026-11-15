@@ -52,3 +52,8 @@ The repo lives on a different machine (`dell`, Wi-Fi `wlp8s0`, no `happ-xray`). 
 
 - Two separate temporary starts gave the same port (`20038`) in step 8, and a different host and port (`7.tcp.eu.ngrok.io:17862`) in step 11.
 - The endpoint is therefore not stable across agent restarts. Discovery and notification are required.
+
+## Telegram reachability (step 14)
+
+- A test message sent from the Pi through the notifier succeeded with the Happ VPN on. The route to `api.telegram.org` went via `happ-xray`.
+- VPN-off reachability is not yet tested. It needs the VPN stopped, which needs your go-ahead.
