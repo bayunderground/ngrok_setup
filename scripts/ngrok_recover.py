@@ -71,8 +71,11 @@ def mark_if_stale(run_dir, has_route, endpoint_present, now=None):
         return False
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
+    request = run_dir / REQUEST_NAME
+    if request.exists():
+        return False
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() if now is None else now))
-    (run_dir / REQUEST_NAME).write_text(stamp + "\n", encoding="utf-8")
+    request.write_text(stamp + "\n", encoding="utf-8")
     return True
 
 

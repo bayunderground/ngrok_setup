@@ -102,6 +102,13 @@ class WatchdogMarkTests(unittest.TestCase):
         self.assertTrue(self.request.exists())
         self.assertEqual(self.request.read_text(encoding="utf-8"), "1970-01-01T00:00:00Z\n")
 
+    def test_existing_request_is_not_refreshed_so_debounce_can_elapse(self):
+        self.run_dir.mkdir(parents=True)
+        self.request.write_text("old\n", encoding="utf-8")
+        os.utime(self.request, (0, 0))
+        self.assertFalse(rec.mark_if_stale(self.run_dir, lambda: True, lambda: False, now=1000))
+        self.assertEqual(os.stat(self.request).st_mtime, 0)
+
     def test_healthy_endpoint_does_not_mark(self):
         self.assertFalse(rec.mark_if_stale(self.run_dir, lambda: True, lambda: True))
         self.assertFalse(self.request.exists())
