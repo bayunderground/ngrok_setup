@@ -4,6 +4,8 @@ Exposes SSH on a Raspberry Pi through an ngrok TCP endpoint and recovers after r
 
 Design and phases: see `DEVELOPMENT_PLAN.md`. Agent rules: see `CLAUDE.md`.
 
+For a user guide in Russian (how to connect, what to do when the address changes, how to stop the tunnel), see `README_RU.md`.
+
 ## Prerequisites
 
 - Raspberry Pi OS / Debian 13 (Trixie), arm64. Other systems fail `check`.
@@ -59,6 +61,20 @@ Restart the tunnel manually:
 sudo systemctl restart ngrok-ssh.service
 ```
 
+Stop the tunnel for real:
+
+```bash
+sudo systemctl disable --now ngrok-ssh.service
+```
+
+A disabled tunnel stays off after a reboot, and the recovery check leaves it alone. A plain `systemctl stop` does not work for this: the recovery check starts the tunnel again within about two minutes whenever it is enabled. To start it again:
+
+```bash
+sudo systemctl enable --now ngrok-ssh.service
+```
+
+Running `sudo ./setup.sh install` also enables it again.
+
 Connect:
 
 ```bash
@@ -68,7 +84,7 @@ ssh -p PORT bliss@HOST                       # from the endpoint printed above
 ## How recovery works
 
 - The NetworkManager dispatcher hook records `up`, `down`, `vpn-up`, `vpn-down`, `connectivity-change`, and `dhcp4-change` events. It never restarts ngrok and does not depend on interface names.
-- `ngrok-ssh-recover.timer` runs every minute. If a default route exists but no endpoint is up, it requests recovery. A recovery run acts only after events have settled for 5 seconds, takes a lock, and restarts the agent only when no endpoint is up.
+- `ngrok-ssh-recover.timer` runs every minute. If a default route exists but no endpoint is up, it requests recovery. A recovery run acts only after events have settled for 5 seconds, takes a lock, and restarts the agent only when no endpoint is up. It does nothing while `ngrok-ssh.service` is disabled.
 - `ngrok-ssh-notify.timer` runs every minute. It announces the endpoint over Telegram only when it changes. If the send fails, the change is retried on the next run.
 
 ## Troubleshooting
