@@ -87,6 +87,20 @@ check_ngrok() {
     fi
 }
 
+check_user_password() {
+    if is_test_root; then
+        pass "user password check skipped (test root)"
+        return 0
+    fi
+    local status
+    status="$(passwd -S "$TARGET_USER" 2>/dev/null | awk '{print $2}')"
+    if [[ "$status" == "P" ]]; then
+        pass "user $TARGET_USER has a usable password (password SSH login)"
+    else
+        fail "user $TARGET_USER has no usable password (set one with: sudo passwd $TARGET_USER)"
+    fi
+}
+
 check_project_files() {
     local missing=0 f
     for f in config/ngrok-ssh.yml scripts/ngrok-endpoint.py scripts/ngrok_recover.py \
@@ -103,6 +117,7 @@ run_check() {
     check_systemd
     check_networkmanager
     check_user
+    check_user_password
     check_ngrok
     check_project_files
     if [[ $FAILURES -eq 0 ]]; then
@@ -144,6 +159,9 @@ UNIT_FILES=(
 )
 ENABLED_UNITS=(ngrok-ssh.service ngrok-ssh-recover.timer ngrok-ssh-notify.timer)
 DISPATCHER_FILE="etc/NetworkManager/dispatcher.d/50-ngrok-ssh"
+SSHD_CONFIG_FILE="etc/ssh/sshd_config"
+SSHD_BEGIN="# BEGIN ngrok-ssh: password login for bliss (managed by setup.sh)"
+SSHD_END="# END ngrok-ssh: password login for bliss"
 
 is_test_root() {
     [[ -n "$ROOT_PREFIX" ]]
@@ -226,6 +244,60 @@ install_payload() {
     install_file "$PROJECT_DIR/dispatcher/50-ngrok-ssh" "$ROOT_PREFIX/$DISPATCHER_FILE" 0755
 }
 
+sshd_managed_block() {
+    printf '%s\n' "$SSHD_BEGIN" "Match User $TARGET_USER" "    PasswordAuthentication yes" "$SSHD_END"
+}
+
+strip_sshd_managed_block() {
+    awk -v b="$SSHD_BEGIN" -v e="$SSHD_END" '$0 == b { skip = 1; next } $0 == e { skip = 0; next } !skip' "$1"
+}
+
+update_sshd_config() {
+    local action="$1" conf="$ROOT_PREFIX/$SSHD_CONFIG_FILE" tmp
+    if [[ ! -f "$conf" ]]; then
+        if [[ "$action" == remove ]]; then
+            echo "sshd config $conf not present; nothing to remove"
+            return 0
+        fi
+        echo "error: $conf not found" >&2
+        return 1
+    fi
+    tmp="$(mktemp)"
+    {
+        strip_sshd_managed_block "$conf"
+        if [[ "$action" == install ]]; then
+            sshd_managed_block
+        fi
+    } > "$tmp"
+    if cmp -s "$tmp" "$conf"; then
+        rm -f "$tmp"
+        echo "sshd password login for $TARGET_USER: no change needed"
+        return 0
+    fi
+    if [[ $DRY_RUN -eq 1 ]]; then
+        rm -f "$tmp"
+        echo "would $action sshd password login for $TARGET_USER in $conf"
+        return 0
+    fi
+    if ! is_test_root && ! sshd -t -f "$tmp"; then
+        rm -f "$tmp"
+        echo "error: sshd rejected the new config; $conf unchanged" >&2
+        return 1
+    fi
+    if [[ ! -e "$conf.bak-ngrok-ssh" ]]; then
+        cp -a "$conf" "$conf.bak-ngrok-ssh"
+        echo "backed up $conf.bak-ngrok-ssh"
+    fi
+    install -m 644 "$tmp" "$conf.new"
+    mv -f "$conf.new" "$conf"
+    rm -f "$tmp"
+    echo "sshd password login for $TARGET_USER: $action done in $conf"
+    if ! is_test_root; then
+        systemctl reload ssh.service
+        echo "reloaded ssh.service"
+    fi
+}
+
 activate_units() {
     if [[ $DRY_RUN -eq 1 ]]; then
         echo "would run systemctl daemon-reload and enable --now: ${ENABLED_UNITS[*]}"
@@ -250,6 +322,7 @@ run_install() {
     verify_units
     ensure_telegram_env
     install_payload
+    update_sshd_config install
     activate_units
 }
 
@@ -301,6 +374,7 @@ run_uninstall() {
         remove_path "$ROOT_PREFIX/etc/systemd/system/$unit"
     done
     remove_dispatcher
+    update_sshd_config remove
     remove_path "$ROOT_PREFIX/$LIB_DIR"
     echo "kept credentials and state: $(telegram_env_file) and $HOME_DIR/.local/state/ngrok-ssh"
     echo "kept ngrok binary and ngrok configuration (not project-owned)"

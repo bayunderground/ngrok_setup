@@ -18,6 +18,15 @@ class SetupScriptTests(unittest.TestCase):
         self.home.mkdir()
         self.os_release = self.base / "os-release"
         self.os_release.write_text("ID=debian\nVERSION_ID=\"13\"\n", encoding="utf-8")
+        self.sshd_config = self.root / "etc/ssh/sshd_config"
+        self.sshd_config.parent.mkdir(parents=True)
+        self.original_sshd = (
+            "Include /etc/ssh/sshd_config.d/*.conf\n"
+            "KbdInteractiveAuthentication no\n"
+            "UsePAM yes\n"
+            "Subsystem\tsftp\t/usr/lib/openssh/sftp-server\n"
+        )
+        self.sshd_config.write_text(self.original_sshd, encoding="utf-8")
         self.env = dict(
             os.environ,
             NGROK_SSH_ROOT=str(self.root),
@@ -59,7 +68,7 @@ class SetupScriptTests(unittest.TestCase):
         result = self.run_setup("--dry-run", "install")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("would install", result.stdout)
-        self.assertFalse(self.root.exists())
+        self.assertFalse((self.root / "usr/local/lib/ngrok-ssh").exists())
         self.assertFalse((self.home / ".config").exists())
 
     def test_install_lays_out_files_with_expected_modes(self):
@@ -134,6 +143,31 @@ class SetupScriptTests(unittest.TestCase):
         result = self.run_setup("uninstall", real_root=True)
         self.assertEqual(result.returncode, 1)
         self.assertIn("must run as root", result.stderr)
+
+    def test_install_adds_bliss_only_password_block_once(self):
+        self.run_setup("install")
+        self.run_setup("install")
+        text = self.sshd_config.read_text(encoding="utf-8")
+        self.assertEqual(text.count("# BEGIN ngrok-ssh"), 1)
+        self.assertTrue(text.startswith(self.original_sshd))
+        self.assertIn("Match User bliss\n    PasswordAuthentication yes\n", text)
+        self.assertTrue((self.root / "etc/ssh/sshd_config.bak-ngrok-ssh").exists())
+
+    def test_install_refuses_when_sshd_config_missing(self):
+        self.sshd_config.unlink()
+        result = self.run_setup("install")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not found", result.stderr)
+
+    def test_uninstall_restores_sshd_config_without_block(self):
+        self.run_setup("install")
+        result = self.run_setup("uninstall")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.sshd_config.read_text(encoding="utf-8"), self.original_sshd)
+
+    def test_dry_run_install_leaves_sshd_config_unchanged(self):
+        self.run_setup("--dry-run", "install")
+        self.assertEqual(self.sshd_config.read_text(encoding="utf-8"), self.original_sshd)
 
     def test_status_reports_state_line_in_test_root(self):
         result = self.run_setup("status")

@@ -160,7 +160,7 @@ Do not use `curl | sh`. Pin or verify downloaded artifacts and checksums/signatu
 ## SSH security
 
 - Forward only to the local SSH daemon, not to all interfaces or unrelated ports.
-- Do not weaken `sshd_config`, enable password authentication, or change authorized keys.
+- Do not change authorized keys. Password authentication is enabled only for user `bliss` on `pi5home` (user decision, see Decisions). Key authentication stays enabled. Password login is disabled for all other users. Do not weaken other `sshd_config` settings.
 - The observed SSH server currently listens on `0.0.0.0:22` and `[::]:22`; the tunnel should nevertheless target loopback.
 - Decision: no ngrok source-IP restriction (`restrict-ips` / `--cidr-allow`) is used; SSH key authentication is the access control. Keep the design able to add it later, but do not implement it now.
 - Document that a public TCP endpoint makes SSH reachable from the internet. Recommend key-based authentication, strong account security, updates, and ngrok traffic restrictions where supported.
@@ -216,6 +216,7 @@ Never report a test as passed unless it was actually executed and its result rec
 - **Stop behaviour (2026-11-15):** recovery and the watchdog respect `systemctl disable`. The documented way to stop the tunnel is `systemctl disable --now ngrok-ssh.service`.
 - **Telegram with the VPN off:** not required (user decision, 2026-11-15). Telegram with the VPN on is verified.
 - **VPN-off measurements:** deferred by user decision (2026-11-15). Do not stop Happ for testing without a new explicit request.
+- **Password SSH login (2026-11-15):** the user asked for password login. Decision: password login only for user `bliss`, key login unchanged. Global `PasswordAuthentication no` stays in `/etc/ssh/sshd_config.d/10-no-password.conf`. A `Match User bliss` block at the end of `/etc/ssh/sshd_config` enables passwords for that user only. It is placed at the end of the main file because a `Match` block in a drop-in would swallow the directives after the `Include` line (including `Subsystem sftp`). `setup.sh install` manages this block between marker lines (backup, `sshd -t`, reload); `uninstall` removes it; `check` requires that `bliss` has a usable password. The manual change was applied and verified on 2026-11-15 (external password login works). Accepted risk: SSH is public through ngrok, so password brute force against `bliss` is possible. Use a strong password and consider `fail2ban` later. This is a host-level change outside the project installer.
 
 ## Open questions
 

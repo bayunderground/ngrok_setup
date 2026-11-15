@@ -12,7 +12,7 @@ For a user guide in Russian (how to connect, what to do when the address changes
 - NetworkManager active.
 - ngrok agent installed at `/usr/local/bin/ngrok`. The setup script does **not** install ngrok yet.
 - A working ngrok config for the service user, at `~/.config/ngrok/ngrok.yml`, containing a valid authtoken. Check it with `ngrok config check`.
-- OpenSSH server listening on port 22, with key-based authentication. Password logins should be disabled (`sshd -T | grep -i passwordauthentication` should print `no`).
+- OpenSSH server listening on port 22, with key-based authentication. Password login is allowed only for user `bliss` (`Match User bliss` at the end of `/etc/ssh/sshd_config`). Global `PasswordAuthentication` stays `no`. Because SSH is publicly reachable through ngrok, use a strong password for `bliss`.
 - A Telegram bot token and chat ID in `.env` (see `.env.example`). `.env` must never be committed.
 
 ## Installation
@@ -31,6 +31,7 @@ sudo ./setup.sh install                # install and enable
 - installs the systemd units to `/etc/systemd/system/`;
 - installs the NetworkManager dispatcher hook to `/etc/NetworkManager/dispatcher.d/50-ngrok-ssh`;
 - creates `~/.config/ngrok-ssh/telegram.env` (mode 600) from the `TELEGRAM_*` keys in `.env`, only if it does not already exist;
+- adds a managed `Match User bliss` block with `PasswordAuthentication yes` to the end of `/etc/ssh/sshd_config` (backup at `sshd_config.bak-ngrok-ssh`, validated with `sshd -t`, then `ssh` is reloaded). Other users keep password login off;
 - enables `ngrok-ssh.service`, `ngrok-ssh-recover.timer`, and `ngrok-ssh-notify.timer`.
 
 Re-running `install` is safe. It overwrites project files and keeps existing credentials.
@@ -108,6 +109,6 @@ sudo ./setup.sh install
 sudo ./setup.sh uninstall
 ```
 
-This stops and disables the project units and removes only the files install placed. It keeps `~/.config/ngrok-ssh/telegram.env`, the notifier state under `~/.local/state/ngrok-ssh/`, the ngrok binary, and the ngrok configuration. A dispatcher file that was edited after install is kept.
+This stops and disables the project units and removes only the files install placed and the managed `sshd_config` block. It keeps `~/.config/ngrok-ssh/telegram.env`, the notifier state under `~/.local/state/ngrok-ssh/`, the ngrok binary, and the ngrok configuration. A dispatcher file that was edited after install is kept.
 
 Existing VPN gateway and Android-sharing components are not touched by this project.
