@@ -57,3 +57,20 @@ The repo lives on a different machine (`dell`, Wi-Fi `wlp8s0`, no `happ-xray`). 
 
 - A test message sent from the Pi through the notifier succeeded with the Happ VPN on. The route to `api.telegram.org` went via `happ-xray`.
 - VPN-off reachability is not yet tested. It needs the VPN stopped, which needs your go-ahead.
+
+## Step 19: agent restart experiment (2026-11-15)
+
+Five consecutive temporary agent starts on the Pi, with the Happ VPN on:
+
+| Run | Endpoint |
+|---|---|
+| 1 | `2.tcp.eu.ngrok.io:24281` |
+| 2 | `2.tcp.eu.ngrok.io:24281` (same as run 1) |
+| 3 | `7.tcp.eu.ngrok.io:17862` (changed) |
+| 4 | `2.tcp.eu.ngrok.io:20038` (changed) |
+| 5 | `2.tcp.eu.ngrok.io:20038` (same as run 4) |
+
+- Restarts sometimes keep the endpoint and sometimes change it.
+- Endpoints previously seen (`17862`, `20038`) reappeared, so the pool is small and reuse is possible.
+- Conclusion: the notifier must handle both cases. Do not assume the address is stable.
+- Not yet measured: Happ VPN start/stop and Ethernet reconnect (both disrupt connectivity and need explicit go-ahead).
