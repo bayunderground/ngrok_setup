@@ -1,0 +1,13 @@
+[Unit]
+Description=Announce ngrok SSH endpoint changes over Telegram
+After=network-online.target ngrok-ssh.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=bliss
+Group=bliss
+Environment=NGROK_SSH_ENV=/home/bliss/.config/ngrok-ssh/telegram.env
+ExecStart=/usr/bin/python3 /usr/local/lib/ngrok-ssh/scripts/ngrok_notify_check.py
+NoNewPrivileges=true
+TimeoutStartSec=60

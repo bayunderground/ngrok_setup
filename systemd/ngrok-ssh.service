@@ -1,6 +1,6 @@
 [Unit]
 Description=ngrok TCP endpoint for local SSH
-Documentation=file:///home/bliss/ngrok_setup/README.md
+Documentation=https://github.com/bayunderground/ngrok_setup
 After=network-online.target ssh.service
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -10,7 +10,7 @@ StartLimitBurst=5
 Type=simple
 User=bliss
 Group=bliss
-ExecStart=/usr/local/bin/ngrok start ssh --config /home/bliss/ngrok_setup/config/ngrok-ssh.yml --config /home/bliss/.config/ngrok/ngrok.yml --log=stdout
+ExecStart=/usr/local/bin/ngrok start ssh --config /usr/local/lib/ngrok-ssh/config/ngrok-ssh.yml --config /home/bliss/.config/ngrok/ngrok.yml --log=stdout
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=true
