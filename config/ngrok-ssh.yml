@@ -1,0 +1,7 @@
+version: "3"
+endpoints:
+  - name: ssh
+    description: SSH on this Pi via a random TCP endpoint
+    url: tcp://
+    upstream:
+      url: 127.0.0.1:22
