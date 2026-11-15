@@ -43,7 +43,18 @@ def restart_agent():
     subprocess.run(["systemctl", "restart", SERVICE], check=True, timeout=60)
 
 
-def run_once(run_dir, has_route, endpoint_present, restart, now=None, debounce=DEBOUNCE_SECONDS):
+def service_enabled():
+    result = subprocess.run(
+        ["systemctl", "is-enabled", "--quiet", SERVICE],
+        capture_output=True, timeout=10, check=False,
+    )
+    return result.returncode == 0
+
+
+def run_once(run_dir, has_route, endpoint_present, restart, now=None,
+             debounce=DEBOUNCE_SECONDS, enabled=lambda: True):
+    if not enabled():
+        return "disabled"
     run_dir = Path(run_dir)
     request = run_dir / REQUEST_NAME
     if not request.exists():
@@ -81,6 +92,9 @@ def mark_if_stale(run_dir, has_route, endpoint_present, now=None):
 
 def main():
     try:
+        if not service_enabled():
+            print("disabled")
+            return 0
         if "--watchdog" in sys.argv[1:]:
             mark_if_stale(RUN_DIR, has_default_route, endpoint_up)
         result = run_once(RUN_DIR, has_default_route, endpoint_up, restart_agent)

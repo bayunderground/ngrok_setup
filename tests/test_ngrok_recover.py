@@ -38,6 +38,16 @@ class RunOnceTests(unittest.TestCase):
             now=now,
         )
 
+    def test_disabled_service_is_left_alone(self):
+        self.make_request(age=30)
+        result = rec.run_once(
+            self.run_dir, lambda: True, lambda: False, self.restart,
+            enabled=lambda: False,
+        )
+        self.assertEqual(result, "disabled")
+        self.assertEqual(self.restarts, [])
+        self.assertTrue(self.request.exists())
+
     def test_no_request_does_nothing(self):
         self.assertEqual(self.run_once(), "no-request")
         self.assertEqual(self.restarts, [])
