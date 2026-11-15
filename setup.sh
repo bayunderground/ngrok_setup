@@ -253,6 +253,59 @@ run_install() {
     activate_units
 }
 
+remove_path() {
+    local path="$1"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "would remove $path"
+        return 0
+    fi
+    rm -rf "$path"
+    echo "removed $path"
+}
+
+deactivate_units() {
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "would disable and stop: ${ENABLED_UNITS[*]}"
+        return 0
+    fi
+    if is_test_root; then
+        echo "systemctl skipped (test root)"
+        return 0
+    fi
+    systemctl disable --now "${ENABLED_UNITS[@]}" 2>/dev/null || true
+    systemctl daemon-reload
+    echo "disabled: ${ENABLED_UNITS[*]}"
+}
+
+remove_dispatcher() {
+    local dest="$ROOT_PREFIX/$DISPATCHER_FILE"
+    if [[ ! -e "$dest" ]]; then
+        return 0
+    fi
+    if ! cmp -s "$PROJECT_DIR/dispatcher/50-ngrok-ssh" "$dest"; then
+        echo "kept $dest (modified; remove it by hand if intended)"
+        return 0
+    fi
+    remove_path "$dest"
+}
+
+run_uninstall() {
+    if [[ $DRY_RUN -eq 0 ]] && ! is_test_root && [[ $EUID -ne 0 ]]; then
+        echo "error: uninstall must run as root (use sudo)" >&2
+        return 1
+    fi
+    resolve_home
+    deactivate_units
+    local unit
+    for unit in "${UNIT_FILES[@]}"; do
+        remove_path "$ROOT_PREFIX/etc/systemd/system/$unit"
+    done
+    remove_dispatcher
+    remove_path "$ROOT_PREFIX/$LIB_DIR"
+    echo "kept credentials and state: $(telegram_env_file) and $HOME_DIR/.local/state/ngrok-ssh"
+    echo "kept ngrok binary and ngrok configuration (not project-owned)"
+}
+
 parse_args() {
     local positional=()
     while [[ $# -gt 0 ]]; do
@@ -277,9 +330,7 @@ main() {
         check) run_check ;;
         status) run_status ;;
         install) run_install ;;
-        uninstall)
-            echo "error: 'uninstall' is not implemented yet" >&2
-            exit 2 ;;
+        uninstall) run_uninstall ;;
         *) echo "error: unknown command '$COMMAND'" >&2; usage >&2; exit 2 ;;
     esac
 }

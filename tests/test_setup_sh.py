@@ -97,6 +97,44 @@ class SetupScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("must run as root", result.stderr)
 
+    def test_uninstall_removes_project_files_and_keeps_credentials(self):
+        self.run_setup("install")
+        result = self.run_setup("uninstall")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / "usr/local/lib/ngrok-ssh").exists())
+        self.assertFalse((self.root / "etc/systemd/system/ngrok-ssh.service").exists())
+        self.assertFalse((self.root / "etc/NetworkManager/dispatcher.d/50-ngrok-ssh").exists())
+        self.assertTrue((self.home / ".config/ngrok-ssh/telegram.env").exists())
+        self.assertIn("kept credentials and state", result.stdout)
+
+    def test_uninstall_keeps_modified_dispatcher_file(self):
+        self.run_setup("install")
+        dispatcher = self.root / "etc/NetworkManager/dispatcher.d/50-ngrok-ssh"
+        dispatcher.write_text("#!/bin/sh\necho edited\n", encoding="utf-8")
+        result = self.run_setup("uninstall")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(dispatcher.exists())
+        self.assertIn("modified", result.stdout)
+
+    def test_dry_run_uninstall_removes_nothing(self):
+        self.run_setup("install")
+        result = self.run_setup("--dry-run", "uninstall")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("would remove", result.stdout)
+        self.assertTrue((self.root / "usr/local/lib/ngrok-ssh").exists())
+
+    def test_uninstall_without_install_is_harmless(self):
+        result = self.run_setup("uninstall")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.run_setup("uninstall")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipIf(os.geteuid() == 0, "must not run the real-system path as root")
+    def test_uninstall_refuses_without_root_on_real_system(self):
+        result = self.run_setup("uninstall", real_root=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("must run as root", result.stderr)
+
     def test_status_reports_state_line_in_test_root(self):
         result = self.run_setup("status")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
