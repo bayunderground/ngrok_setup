@@ -1,0 +1,19 @@
+#!/bin/sh
+# NetworkManager dispatcher hook for ngrok-ssh. Records relevant events and
+# sets a recovery request flag. It never restarts ngrok itself.
+# Arguments from NetworkManager: $1 = interface name, $2 = action.
+
+RUN_DIR="${NGROK_SSH_RUN_DIR:-/run/ngrok-ssh}"
+
+case "$2" in
+    up|down|vpn-up|vpn-down|connectivity-change|dhcp4-change) ;;
+    *) exit 0 ;;
+esac
+
+mkdir -p "$RUN_DIR" 2>/dev/null || exit 0
+date -u +%Y-%m-%dT%H:%M:%SZ > "$RUN_DIR/recover.request"
+
+if command -v logger >/dev/null 2>&1; then
+    logger -t ngrok-ssh-dispatch "event=$2 iface=${1:-none}"
+fi
+exit 0
