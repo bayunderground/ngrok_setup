@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic recovery check for the ngrok SSH tunnel
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=ngrok-ssh-recover.service
+
+[Install]
+WantedBy=timers.target

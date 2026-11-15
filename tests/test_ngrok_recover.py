@@ -88,5 +88,28 @@ class RunOnceTests(unittest.TestCase):
         self.assertEqual(len(self.restarts), 1)
 
 
+class WatchdogMarkTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.run_dir = Path(self.dir.name) / "run"
+        self.request = self.run_dir / rec.REQUEST_NAME
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_missing_endpoint_with_route_marks_request(self):
+        self.assertTrue(rec.mark_if_stale(self.run_dir, lambda: True, lambda: False, now=0))
+        self.assertTrue(self.request.exists())
+        self.assertEqual(self.request.read_text(encoding="utf-8"), "1970-01-01T00:00:00Z\n")
+
+    def test_healthy_endpoint_does_not_mark(self):
+        self.assertFalse(rec.mark_if_stale(self.run_dir, lambda: True, lambda: True))
+        self.assertFalse(self.request.exists())
+
+    def test_no_route_does_not_mark(self):
+        self.assertFalse(rec.mark_if_stale(self.run_dir, lambda: False, lambda: False))
+        self.assertFalse(self.request.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

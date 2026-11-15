@@ -66,8 +66,20 @@ def run_once(run_dir, has_route, endpoint_present, restart, now=None, debounce=D
         return "restarted"
 
 
+def mark_if_stale(run_dir, has_route, endpoint_present, now=None):
+    if not has_route() or endpoint_present():
+        return False
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() if now is None else now))
+    (run_dir / REQUEST_NAME).write_text(stamp + "\n", encoding="utf-8")
+    return True
+
+
 def main():
     try:
+        if "--watchdog" in sys.argv[1:]:
+            mark_if_stale(RUN_DIR, has_default_route, endpoint_up)
         result = run_once(RUN_DIR, has_default_route, endpoint_up, restart_agent)
     except (subprocess.SubprocessError, OSError) as exc:
         print(f"recovery failed: {exc}", file=sys.stderr)

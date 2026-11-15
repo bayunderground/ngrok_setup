@@ -1,0 +1,8 @@
+[Unit]
+Description=Recover the ngrok SSH tunnel when its endpoint is missing
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/bliss/ngrok_setup/scripts/ngrok_recover.py --watchdog
+NoNewPrivileges=true
