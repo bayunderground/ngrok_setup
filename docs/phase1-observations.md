@@ -47,3 +47,8 @@ The repo lives on a different machine (`dell`, Wi-Fi `wlp8s0`, no `happ-xray`). 
 - A temporary `ngrok tcp 22` on the Pi was assigned a TCP endpoint on `tcp://2.tcp.eu.ngrok.io` with a random port. The free account can create TCP endpoints.
 - The endpoint address is random per start. Port and host must be treated as changeable.
 - The agent stopped cleanly after the test. Nothing is left running.
+
+## Endpoint change across restarts
+
+- Two separate temporary starts gave the same port (`20038`) in step 8, and a different host and port (`7.tcp.eu.ngrok.io:17862`) in step 11.
+- The endpoint is therefore not stable across agent restarts. Discovery and notification are required.
