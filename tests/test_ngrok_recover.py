@@ -98,6 +98,72 @@ class RunOnceTests(unittest.TestCase):
         self.assertEqual(len(self.restarts), 1)
 
 
+class CooldownTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.run_dir = Path(self.dir.name) / "run"
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_first_restart_is_allowed(self):
+        self.assertTrue(rec.restart_allowed(self.run_dir, now=0))
+
+    def test_restart_inside_cooldown_is_refused(self):
+        rec.record_restart(self.run_dir)
+        marker = self.run_dir / rec.COOLDOWN_NAME
+        now = marker.stat().st_mtime
+        self.assertFalse(rec.restart_allowed(self.run_dir, now=now + 60))
+        self.assertTrue(rec.restart_allowed(self.run_dir, now=now + rec.RESTART_COOLDOWN_SECONDS))
+
+    def test_run_once_reports_cooldown_without_restarting(self):
+        self.run_dir.mkdir(parents=True)
+        restarts = []
+        (self.run_dir / rec.REQUEST_NAME).write_text("ts\n", encoding="utf-8")
+        os.utime(self.run_dir / rec.REQUEST_NAME, (0, 0))
+        result = rec.run_once(
+            self.run_dir, lambda: True, lambda: False, lambda: restarts.append(1),
+            now=100, may_restart=lambda: False,
+        )
+        self.assertEqual(result, "cooldown")
+        self.assertEqual(restarts, [])
+
+
+class ProbeTests(unittest.TestCase):
+    def serve(self, payload):
+        import socket
+        import threading
+
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+
+        def handle():
+            conn, _ = listener.accept()
+            if payload is not None:
+                conn.sendall(payload)
+            conn.close()
+            listener.close()
+
+        threading.Thread(target=handle, daemon=True).start()
+        return f"127.0.0.1:{listener.getsockname()[1]}"
+
+    def test_ssh_banner_means_reachable(self):
+        self.assertTrue(rec.probe_reachable(self.serve(b"SSH-2.0-OpenSSH_10.0\r\n")))
+
+    def test_non_ssh_answer_is_not_reachable(self):
+        self.assertFalse(rec.probe_reachable(self.serve(b"HTTP/1.1 503\r\n")))
+
+    def test_closed_connection_is_not_reachable(self):
+        self.assertFalse(rec.probe_reachable(self.serve(None)))
+
+    def test_refused_connection_is_not_reachable(self):
+        self.assertFalse(rec.probe_reachable("127.0.0.1:1", timeout=2))
+
+    def test_malformed_endpoint_is_not_reachable(self):
+        self.assertFalse(rec.probe_reachable("no-port"))
+
+
 class WatchdogMarkTests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

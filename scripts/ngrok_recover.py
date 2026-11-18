@@ -3,6 +3,7 @@
 import fcntl
 import importlib.util
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -13,7 +14,10 @@ RUN_DIR = Path(os.environ.get("NGROK_SSH_RUN_DIR", "/run/ngrok-ssh"))
 REQUEST_NAME = "recover.request"
 LOCK_NAME = "recover.lock"
 DEBOUNCE_SECONDS = 5
+RESTART_COOLDOWN_SECONDS = 600
+PROBE_TIMEOUT = 10
 SERVICE = "ngrok-ssh.service"
+COOLDOWN_NAME = "last-restart"
 
 
 def _load(name, filename):
@@ -34,13 +38,42 @@ def has_default_route():
     return bool(result.stdout.strip())
 
 
+def probe_reachable(endpoint, timeout=PROBE_TIMEOUT):
+    host, _, port = endpoint.rpartition(":")
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            return sock.recv(64).startswith(b"SSH-2.0-")
+    except (OSError, ValueError):
+        return False
+
+
 def endpoint_up():
     endpoint, _ = endpoint_helper.lookup()
-    return endpoint is not None
+    return endpoint is not None and probe_reachable(endpoint)
+
+
+def restart_allowed(run_dir, now=None, cooldown=RESTART_COOLDOWN_SECONDS):
+    marker = Path(run_dir) / COOLDOWN_NAME
+    if not marker.exists():
+        return True
+    now = time.time() if now is None else now
+    return now - marker.stat().st_mtime >= cooldown
+
+
+def record_restart(run_dir):
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / COOLDOWN_NAME).write_text("restarted\n", encoding="utf-8")
 
 
 def restart_agent():
     subprocess.run(["systemctl", "restart", SERVICE], check=True, timeout=60)
+
+
+def restart_then_record(run_dir):
+    restart_agent()
+    record_restart(run_dir)
 
 
 def service_enabled():
@@ -52,7 +85,8 @@ def service_enabled():
 
 
 def run_once(run_dir, has_route, endpoint_present, restart, now=None,
-             debounce=DEBOUNCE_SECONDS, enabled=lambda: True):
+             debounce=DEBOUNCE_SECONDS, enabled=lambda: True,
+             may_restart=lambda: True):
     if not enabled():
         return "disabled"
     run_dir = Path(run_dir)
@@ -73,6 +107,8 @@ def run_once(run_dir, has_route, endpoint_present, restart, now=None,
             return "no-route"
         if endpoint_present():
             return "healthy"
+        if not may_restart():
+            return "cooldown"
         restart()
         return "restarted"
 
@@ -97,7 +133,10 @@ def main():
             return 0
         if "--watchdog" in sys.argv[1:]:
             mark_if_stale(RUN_DIR, has_default_route, endpoint_up)
-        result = run_once(RUN_DIR, has_default_route, endpoint_up, restart_agent)
+        result = run_once(
+            RUN_DIR, has_default_route, endpoint_up, lambda: restart_then_record(RUN_DIR),
+            may_restart=lambda: restart_allowed(RUN_DIR),
+        )
     except (subprocess.SubprocessError, OSError) as exc:
         print(f"recovery failed: {exc}", file=sys.stderr)
         return 1
