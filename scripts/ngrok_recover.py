@@ -53,12 +53,24 @@ def endpoint_up():
     return endpoint is not None and probe_reachable(endpoint)
 
 
-def restart_allowed(run_dir, now=None, cooldown=RESTART_COOLDOWN_SECONDS):
+def ssh_connections_open():
+    result = subprocess.run(
+        ["ss", "-Htn", "state", "established", "( sport = :22 )"],
+        capture_output=True, text=True, timeout=10, check=True,
+    )
+    return len([line for line in result.stdout.splitlines() if line.strip()])
+
+
+def restart_blocker(run_dir, now=None, cooldown=RESTART_COOLDOWN_SECONDS):
+    if ssh_connections_open():
+        return "sessions-active"
     marker = Path(run_dir) / COOLDOWN_NAME
     if not marker.exists():
-        return True
+        return None
     now = time.time() if now is None else now
-    return now - marker.stat().st_mtime >= cooldown
+    if now - marker.stat().st_mtime < cooldown:
+        return "cooldown"
+    return None
 
 
 def record_restart(run_dir):
@@ -86,7 +98,7 @@ def service_enabled():
 
 def run_once(run_dir, has_route, endpoint_present, restart, now=None,
              debounce=DEBOUNCE_SECONDS, enabled=lambda: True,
-             may_restart=lambda: True):
+             blocker=lambda: None):
     if not enabled():
         return "disabled"
     run_dir = Path(run_dir)
@@ -107,8 +119,9 @@ def run_once(run_dir, has_route, endpoint_present, restart, now=None,
             return "no-route"
         if endpoint_present():
             return "healthy"
-        if not may_restart():
-            return "cooldown"
+        reason = blocker()
+        if reason:
+            return reason
         restart()
         return "restarted"
 
@@ -135,7 +148,7 @@ def main():
             mark_if_stale(RUN_DIR, has_default_route, endpoint_up)
         result = run_once(
             RUN_DIR, has_default_route, endpoint_up, lambda: restart_then_record(RUN_DIR),
-            may_restart=lambda: restart_allowed(RUN_DIR),
+            blocker=lambda: restart_blocker(RUN_DIR),
         )
     except (subprocess.SubprocessError, OSError) as exc:
         print(f"recovery failed: {exc}", file=sys.stderr)

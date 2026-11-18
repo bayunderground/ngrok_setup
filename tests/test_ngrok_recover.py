@@ -98,7 +98,7 @@ class RunOnceTests(unittest.TestCase):
         self.assertEqual(len(self.restarts), 1)
 
 
-class CooldownTests(unittest.TestCase):
+class RestartBlockerTests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.run_dir = Path(self.dir.name) / "run"
@@ -106,26 +106,37 @@ class CooldownTests(unittest.TestCase):
     def tearDown(self):
         self.dir.cleanup()
 
-    def test_first_restart_is_allowed(self):
-        self.assertTrue(rec.restart_allowed(self.run_dir, now=0))
+    def blocker(self, sessions, now=0):
+        original = rec.ssh_connections_open
+        rec.ssh_connections_open = lambda: sessions
+        try:
+            return rec.restart_blocker(self.run_dir, now=now)
+        finally:
+            rec.ssh_connections_open = original
+
+    def test_first_restart_is_allowed_without_sessions(self):
+        self.assertIsNone(self.blocker(sessions=0))
+
+    def test_open_session_blocks_restart_even_with_no_cooldown(self):
+        self.assertEqual(self.blocker(sessions=1), "sessions-active")
 
     def test_restart_inside_cooldown_is_refused(self):
         rec.record_restart(self.run_dir)
         marker = self.run_dir / rec.COOLDOWN_NAME
         now = marker.stat().st_mtime
-        self.assertFalse(rec.restart_allowed(self.run_dir, now=now + 60))
-        self.assertTrue(rec.restart_allowed(self.run_dir, now=now + rec.RESTART_COOLDOWN_SECONDS))
+        self.assertEqual(self.blocker(sessions=0, now=now + 60), "cooldown")
+        self.assertIsNone(self.blocker(sessions=0, now=now + rec.RESTART_COOLDOWN_SECONDS))
 
-    def test_run_once_reports_cooldown_without_restarting(self):
+    def test_run_once_reports_blocker_without_restarting(self):
         self.run_dir.mkdir(parents=True)
         restarts = []
         (self.run_dir / rec.REQUEST_NAME).write_text("ts\n", encoding="utf-8")
         os.utime(self.run_dir / rec.REQUEST_NAME, (0, 0))
         result = rec.run_once(
             self.run_dir, lambda: True, lambda: False, lambda: restarts.append(1),
-            now=100, may_restart=lambda: False,
+            now=100, blocker=lambda: "sessions-active",
         )
-        self.assertEqual(result, "cooldown")
+        self.assertEqual(result, "sessions-active")
         self.assertEqual(restarts, [])
 
 
