@@ -45,6 +45,7 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(
             command,
             "umask 077; cat > /root/pi5home_ngrok_endpoint.txt.tmp"
+            " && test -s /root/pi5home_ngrok_endpoint.txt.tmp"
             " && mv -f /root/pi5home_ngrok_endpoint.txt.tmp /root/pi5home_ngrok_endpoint.txt",
         )
         self.assertNotIn(">>", command)

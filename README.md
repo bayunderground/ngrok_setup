@@ -62,11 +62,13 @@ Read it from any machine that can SSH to vdsn2 as root:
 ssh root@vdsn2 cat /root/pi5home_ngrok_endpoint.txt
 ```
 
-Write a value by hand (the notify job overwrites it on its next change):
+Write a value by hand (the notify job overwrites it on its next change). The `test -s` step refuses empty input, so the file cannot be replaced by an empty one:
 
 ```bash
-echo "ssh -p 25605 bliss@2.tcp.eu.ngrok.io" | ssh root@vdsn2 'umask 077; cat > /root/pi5home_ngrok_endpoint.txt.tmp && mv -f /root/pi5home_ngrok_endpoint.txt.tmp /root/pi5home_ngrok_endpoint.txt'
+echo "ssh -p 25605 bliss@2.tcp.eu.ngrok.io" | ssh root@vdsn2 'umask 077; cat > /root/pi5home_ngrok_endpoint.txt.tmp && test -s /root/pi5home_ngrok_endpoint.txt.tmp && mv -f /root/pi5home_ngrok_endpoint.txt.tmp /root/pi5home_ngrok_endpoint.txt'
 ```
+
+Do not put an `ssh` into the pipe in place of `echo`: the pipe then carries whatever that session prints, not the endpoint line.
 
 Each channel keeps its own state in `~/.local/state/ngrok-ssh/` (`last_remote` for the file, `last_endpoint` for Telegram). Deleting `last_remote` makes the next run rewrite the file.
 

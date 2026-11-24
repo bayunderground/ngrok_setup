@@ -20,7 +20,10 @@ class PublishError(Exception):
 
 def remote_command(path):
     tmp = f"{path}.tmp"
-    return f"umask 077; cat > {shlex.quote(tmp)} && mv -f {shlex.quote(tmp)} {shlex.quote(path)}"
+    return (
+        f"umask 077; cat > {shlex.quote(tmp)} && test -s {shlex.quote(tmp)}"
+        f" && mv -f {shlex.quote(tmp)} {shlex.quote(path)}"
+    )
 
 
 def publish(line, remote=REMOTE, path=REMOTE_FILE, run=subprocess.run):
