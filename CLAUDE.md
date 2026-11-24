@@ -17,7 +17,7 @@ The project must also include an **idempotent setup script** that can install th
 The project is implemented and installed on `pi5home`. Phase-by-phase status and the test matrix are in `DEVELOPMENT_PLAN.md`, sections 2 and 6.
 
 - Installed: `ngrok-ssh.service`, `ngrok-ssh-recover.timer`, `ngrok-ssh-notify.timer`, and the NetworkManager dispatcher hook `50-ngrok-ssh`. The tunnel is up.
-- Implemented and tested: `setup.sh check|status|install|uninstall` (`--dry-run`, `--user`), endpoint helper, recovery with debounce and lock, watchdog, Telegram notifier (state file, retries, 0600 credentials). 58 unit tests pass on the Pi.
+- Implemented and tested: `setup.sh check|status|install|uninstall` (`--dry-run`, `--user`), endpoint helper, recovery with debounce and lock, watchdog, notifier (per-channel state, retries). The notifier publishes to the remote file on `root@vdsn2` (since 2026-11-24) and to Telegram as an optional channel. Unit tests: see the test run recorded in `DEVELOPMENT_PLAN.md`.
 - Verified on the Pi: tunnel starts after reboot; crash (`SIGKILL`) is restarted by systemd; watchdog recovers a missing endpoint within about two minutes; a disabled service stays disabled; endpoint changes are announced in Telegram; Telegram works with the VPN on.
 - Not yet verified: Ethernet and Wi-Fi transitions; full VPN stop/start; real uninstall/reinstall on the Pi; clean install on a fresh Debian 13 arm64 system; automated ngrok binary install (not implemented).
 - Development happens on the Pi, in `~/ngrok_setup`. Commit after each major change and push with the Pi's deploy key. The deploy key has write access to this repository only.
@@ -210,9 +210,10 @@ Never report a test as passed unless it was actually executed and its result rec
 - Supported OS: Debian 13 (Trixie) arm64 only.
 - Source-IP restriction: not used; rely on SSH key authentication only.
 - **Plan decision: free plan only.** The user wanted a static hostname, but a reserved TCP Address needs a paid plan and the user chose to stay free. The public address is therefore random (`tcp://` with no fixed address) and may change. Do not require or assume a reserved address. Keep the config able to accept an optional reserved address later, but implement and test the random-address mode.
-- **Change notification: Telegram.** The Pi sends the user a Telegram message whenever the public endpoint changes (and on first establishment). The user has a bot token and chat ID (values not shared in chat and must not be requested or logged).
+- **Change notification: remote file (2026-11-24).** The Pi writes the current endpoint line, `ssh -p PORT bliss@HOST`, to `/root/pi5home_ngrok_endpoint.txt` on `root@vdsn2` whenever it changes, and on first establishment. When the tunnel is down, the line is `ngrok tunnel is down`. The write is a fixed remote command (`umask 077; cat > tmp && mv -f tmp file`) with the content on stdin, using `BatchMode`, `StrictHostKeyChecking=yes`, and a timeout. The SSH key and host key for vdsn2 are already registered for `bliss`. vdsn2 is reachable with the Happ VPN on or off. The file must contain one line only: overwrite, never append. Implemented in `scripts/ngrok_notify_remote.py`.
+- **Telegram: optional second channel (2026-11-24).** Telegram stays as a second channel, enabled only when `~/.config/ngrok-ssh/telegram.env` exists. Each channel keeps its own state (`last_remote`, `last_endpoint`), so one channel's failure does not block or repeat the other. The bot token and chat ID (values not shared in chat and must not be requested or logged).
 - Happ: the host runs Happ with the VPN on; the tunnel must work with it (compatibility is required, but Happ is still not installed/configured by this project, and the generic network recovery must not depend on Happ-specific names).
-- **Telegram credentials (2026-11-15):** the bot token and chat ID live in the repository's `.env` (gitignored, mode 600 on the Pi). `setup.sh install` copies only the two `TELEGRAM_*` keys to `~/.config/ngrok-ssh/telegram.env` (mode 600, owned by `bliss`). Reinstalls keep the existing file.
+- **Telegram credentials (2026-11-15):** the bot token and chat ID live in the repository's `.env` (gitignored, mode 600 on the Pi). `setup.sh install` copies only the two `TELEGRAM_*` keys to `~/.config/ngrok-ssh/telegram.env` (mode 600, owned by `bliss`), if `.env` has them; otherwise the Telegram channel stays off and the install still succeeds. Reinstalls keep the existing file.
 - **Stop behaviour (2026-11-15):** recovery and the watchdog respect `systemctl disable`. The documented way to stop the tunnel is `systemctl disable --now ngrok-ssh.service`.
 - **Telegram with the VPN off:** not required (user decision, 2026-11-15). Telegram with the VPN on is verified.
 - **VPN-off measurements:** deferred by user decision (2026-11-15). Do not stop Happ for testing without a new explicit request.
@@ -223,7 +224,7 @@ Never report a test as passed unless it was actually executed and its result rec
 Record answers here as they are given; do not guess.
 
 1. **Resolved:** a TCP endpoint starts on the free plan (verified 2026-11-15).
-2. **Resolved:** free plan only; changed addresses are delivered by Telegram.
+2. **Resolved:** free plan only; changed addresses are written to `root@vdsn2:/root/pi5home_ngrok_endpoint.txt` (since 2026-11-24, with optional Telegram).
 3. **Resolved:** the authtoken in `/home/bliss/.config/ngrok/ngrok.yml` is valid. The agent starts and receives an endpoint. The token was never printed.
 4. **Resolved:** Telegram storage uses the 0600 file described above, created by `setup.sh install` without echoing values.
 5. **Partly resolved:** Telegram reachable with the VPN on: yes. With the VPN off: not tested, and not required by the user.
@@ -231,11 +232,11 @@ Record answers here as they are given; do not guess.
 7. **Open:** Ethernet and Wi-Fi transition tests. Needs an explicit go-ahead and a rescue plan (physical access or a second network path) before running, because SSH may drop.
 8. **Open:** a fresh-system test. Needs a disposable Debian 13 arm64 system (VM or SD image) to run `check`, `install`, and `uninstall`.
 
-## Telegram notification requirements
+## Endpoint publication requirements
 
-- Send via the Telegram Bot API HTTPS endpoint using Python standard library (`urllib`), with explicit timeouts. Never pass the bot token on a command line (so no `curl` with the token in arguments).
-- Notify only when the endpoint differs from the last successfully notified endpoint; keep that state in a project-owned state file so restarts do not cause duplicate messages or missed changes.
-- Message content: the new `host:port`, a ready-to-use `ssh -p <port> <user>@<host>` line, and a timestamp. No tokens, no authtoken, no config contents.
-- Retry with bounded backoff if Telegram or the network is unreachable; deliver the latest endpoint only (drop stale queued ones). If sending fails, keep the change marked as unnotified and retry on the next recovery cycle or watchdog tick.
+- Remote file (primary): publish only when the value differs from the last value published to that channel, using a project-owned state file (`last_remote`). Content: the single line `ssh -p <port> <user>@<host>`, or `ngrok tunnel is down`. Pass the content on stdin; never on the command line. Overwrite the file atomically via a temp file and `mv`, with mode 600 (`umask 077`).
+- Telegram (optional): send via the Bot API HTTPS endpoint using the Python standard library (`urllib`), with explicit timeouts. Never pass the bot token on a command line. Message: the endpoint line, a timestamp, and for down, `ngrok SSH tunnel is down`. Retries are bounded (`ATTEMPTS`, backoff). Its state is `last_endpoint`.
+- No tokens, authtoken, or config contents in any message, file, or log.
+- A failed publish keeps that channel unrecorded, so the next run retries it. Only the latest value is sent; stale values are not queued.
 - Do not let notification failures block or restart the tunnel.
-- Treat the notification path (Telegram reached through whichever route is active, including Happ's VPN) as a tested requirement, not an assumption.
+- Treat the notification paths (vdsn2 and Telegram, reached through whichever route is active, including Happ's VPN) as tested requirements, not assumptions.

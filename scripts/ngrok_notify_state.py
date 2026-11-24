@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Track the last endpoint that was successfully announced."""
+"""Track the last value successfully published by each notification channel."""
 import os
 import tempfile
 from pathlib import Path
 
-DEFAULT_STATE = Path.home() / ".local" / "state" / "ngrok-ssh" / "last_endpoint"
+DOWN = "down"
+DEFAULT_DIR = Path.home() / ".local" / "state" / "ngrok-ssh"
 
 
-def state_path():
-    override = os.environ.get("NGROK_SSH_STATE")
-    return Path(override) if override else DEFAULT_STATE
+def state_path(name):
+    override = os.environ.get("NGROK_SSH_STATE_DIR")
+    return (Path(override) if override else DEFAULT_DIR) / name
 
 
 def read_last(path):

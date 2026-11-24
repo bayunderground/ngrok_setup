@@ -75,6 +75,14 @@ class MessageTests(unittest.TestCase):
         )
 
 
+    def test_down_message_says_tunnel_is_down(self):
+        now = datetime(2026, 11, 15, 12, 30, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            tg.build_down_message(now=now),
+            "ngrok SSH tunnel is down\n2026-11-15 12:30:00 UTC",
+        )
+
+
 class SendTests(unittest.TestCase):
     def test_success_on_first_attempt(self):
         opener = fake_opener([200])

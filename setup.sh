@@ -147,6 +147,7 @@ SCRIPT_FILES=(
     scripts/ngrok-endpoint.py
     scripts/ngrok_notify_state.py
     scripts/ngrok_notify_telegram.py
+    scripts/ngrok_notify_remote.py
     scripts/ngrok_notify_check.py
     scripts/ngrok_recover.py
 )
@@ -194,9 +195,9 @@ ensure_telegram_env() {
         echo "kept existing $dest"
         return 0
     fi
-    if [[ ! -f "$PROJECT_DIR/.env" ]]; then
-        echo "error: no $dest and no $PROJECT_DIR/.env to create it from" >&2
-        return 1
+    if [[ ! -f "$PROJECT_DIR/.env" ]] || ! grep -qE '^TELEGRAM_(BOT_TOKEN|CHAT_ID)=' "$PROJECT_DIR/.env"; then
+        echo "telegram: optional channel off (no TELEGRAM_* keys in $PROJECT_DIR/.env)"
+        return 0
     fi
     if [[ $DRY_RUN -eq 1 ]]; then
         echo "would create $dest (mode 600) from TELEGRAM_* keys in .env"

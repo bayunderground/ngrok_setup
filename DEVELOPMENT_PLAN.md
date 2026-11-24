@@ -2,7 +2,7 @@
 
 ## 1. Objective
 
-Expose SSH on the Raspberry Pi `pi5home` through an ngrok TCP tunnel, and keep it working across boot, Ethernet/Wi-Fi changes, Happ VPN transitions, and ngrok crashes. The Pi announces the current public address over Telegram whenever it changes.
+Expose SSH on the Raspberry Pi `pi5home` through an ngrok TCP tunnel, and keep it working across boot, Ethernet/Wi-Fi changes, Happ VPN transitions, and ngrok crashes. The Pi writes the current public address, as a ready-to-use `ssh` line, to `/root/pi5home_ngrok_endpoint.txt` on `root@vdsn2` whenever it changes. Telegram is an optional second channel.
 
 The project is reproducible on a fresh supported system (Debian 13 / Raspberry Pi OS, arm64) through an idempotent setup script.
 
@@ -75,7 +75,7 @@ Existing dispatcher caveat: `90-android-vpn-share` matches `wlp8s0` and `tun0`, 
 3. The tunnel comes back when a usable path appears (Ethernet, Wi-Fi, or VPN).
 4. A crashed agent is restarted by systemd.
 5. A missed network event is caught by the watchdog within about two minutes.
-6. The current endpoint is available on the Pi (`status`) and is sent to Telegram when it changes.
+6. The current endpoint is available on the Pi (`status`) and is written to `root@vdsn2:/root/pi5home_ngrok_endpoint.txt` when it changes. When the tunnel is down, the file says so. Telegram is sent too when configured.
 7. Stopping the tunnel is explicit (`systemctl disable --now`); the recovery code does not override it.
 8. Existing VPN gateway and Android-sharing components are untouched.
 9. The same project installs on a fresh supported system with `setup.sh install`.
@@ -92,7 +92,7 @@ Existing dispatcher caveat: `90-android-vpn-share` matches `wlp8s0` and `tun0`, 
 | Dispatcher hook | `dispatcher/50-ngrok-ssh` | NetworkManager events (`up`, `down`, `vpn-up`, `vpn-down`, `connectivity-change`, `dhcp4-change`): sets a request flag; never restarts |
 | Recovery | `scripts/ngrok_recover.py`, `systemd/ngrok-ssh-recover.{service,timer}` | Debounce (5 s), lock, restart only when a route exists and no endpoint is up; does nothing when the service is disabled |
 | Watchdog | same script, `--watchdog` | Every 60 s: sets the request flag if a route exists but no endpoint is up |
-| Notifier | `scripts/ngrok_notify_check.py`, `ngrok_notify_state.py`, `ngrok_notify_telegram.py`, `systemd/ngrok-ssh-notify.{service,timer}` | Sends a Telegram message when the endpoint differs from the last announced one |
+| Notifier | `scripts/ngrok_notify_check.py`, `ngrok_notify_remote.py`, `ngrok_notify_state.py`, `ngrok_notify_telegram.py`, `systemd/ngrok-ssh-notify.{service,timer}` | Publishes the endpoint, or `ngrok tunnel is down`, to the remote file when the value changes; Telegram too when configured. Each channel has its own state |
 | Setup | `setup.sh` | `check`, `status`, `install`, `uninstall`; `--dry-run`, `--user`; test hooks via `NGROK_SSH_ROOT` |
 | Tests | `tests/` | 58 unit tests (unittest), run on the Pi |
 
@@ -101,8 +101,9 @@ Existing dispatcher caveat: `90-android-vpn-share` matches `wlp8s0` and `tun0`, 
 - `/usr/local/lib/ngrok-ssh/scripts/*`, `/usr/local/lib/ngrok-ssh/config/ngrok-ssh.yml`
 - `/etc/systemd/system/ngrok-ssh*.{service,timer}`
 - `/etc/NetworkManager/dispatcher.d/50-ngrok-ssh`
-- `/home/bliss/.config/ngrok-ssh/telegram.env` (mode 600, created from the `TELEGRAM_*` keys in `.env`; kept on reinstall)
-- `/home/bliss/.local/state/ngrok-ssh/last_endpoint` (mode 600, notifier state)
+- `/home/bliss/.config/ngrok-ssh/telegram.env` (optional; mode 600, created from the `TELEGRAM_*` keys in `.env`; kept on reinstall)
+- `/home/bliss/.local/state/ngrok-ssh/last_remote` and `last_endpoint` (mode 600, per-channel notifier state)
+- `root@vdsn2:/root/pi5home_ngrok_endpoint.txt` (remote, mode 600, one line; written over SSH, not removed by uninstall)
 - `/run/ngrok-ssh/` (recovery flag and lock; tmpfs)
 
 ### 5.3 Decisions made during implementation
@@ -110,8 +111,9 @@ Existing dispatcher caveat: `90-android-vpn-share` matches `wlp8s0` and `tun0`, 
 - Recovery restarts the agent only when no endpoint is up. A healthy endpoint is left alone, to avoid restart storms.
 - The watchdog creates the request flag only when none exists, so the debounce can elapse. (Bug found in the watchdog test: rewriting the flag every minute kept it under 5 seconds old forever. Fixed in `e4939a7`.)
 - A disabled `ngrok-ssh.service` is respected by recovery. `systemctl disable --now ngrok-ssh.service` is the way to stop the tunnel for real. A plain `systemctl stop` is undone by the watchdog within about two minutes. (`c08ff8a`.)
-- The notifier sends only on change and writes its state only after a successful send. A failed send is retried on the next run.
-- Telegram credentials are copied from `.env` into `~/.config/ngrok-ssh/telegram.env` at install time. `.env` is gitignored and stays on the Pi only.
+- The notifier publishes only on change and writes each channel's state only after a successful publish. A failed publish is retried on the next run. Channels are independent.
+- Endpoint file on vdsn2 (2026-11-24, replaces the Telegram-only design as the primary channel): fixed remote command with the content on stdin, so no value is in argv; atomic `mv`; `umask 077`. Uses the existing key and host key for `root@vdsn2`, reachable with the Happ VPN on or off. Overwrite, never append: one line only.
+- Telegram is an optional second channel, enabled when `telegram.env` exists. Its credentials are copied from `.env` into `~/.config/ngrok-ssh/telegram.env` at install time. `.env` is gitignored and stays on the Pi only.
 - Installed units point at `/usr/local/lib/ngrok-ssh`, not at the repository checkout.
 - The ngrok binary is not installed by `setup.sh`. `check` fails without it. Automating an official, verifiable install is open (section 8).
 
@@ -220,7 +222,7 @@ Security checks:
 
 - Stop the tunnel for real: `sudo systemctl disable --now ngrok-ssh.service`. Re-enable with `sudo systemctl enable --now ngrok-ssh.service` (re-running `setup.sh install` does the same).
 - Sudo: `bliss` has passwordless sudo only for some Happ diagnostic commands. Installs need a cached sudo session (`sudo -v`), which lasts about 15 minutes.
-- Endpoint changes are announced in Telegram within about two minutes.
+- Endpoint changes are written to the vdsn2 file within about two minutes (the notify timer runs every 60 s). Telegram is sent at the same time when configured.
 - Free plan limits apply: 1 GB/month data out, 5,000 TCP connections/month.
 
 ## 8. Open items and risks
@@ -234,7 +236,8 @@ Security checks:
 | Fresh-system install not tested | Reproducibility is unproven | Build a clean Debian 13 arm64 image or VM and run `check`, `install`, `uninstall` |
 | ngrok binary not installed by `setup.sh` | Fresh install stops at `check` until ngrok is installed | Decide on an official, verified install method |
 | Dispatcher hook not yet fired by real NM events | Event path is unverified on the Pi | Trigger a real event with the user's go-ahead (ties to Ethernet/VPN tests) |
-| Random endpoint address on the free plan | Clients must use the Telegram message after each change | Accepted by decision; reserved address would need a paid plan |
+| Random endpoint address on the free plan | Clients read the vdsn2 file (or the optional Telegram message) after each change | Accepted by decision; reserved address would need a paid plan |
+| vdsn2 unreachable | Endpoint file goes stale until the next successful write | Retried every minute; the failure is in `journalctl -u ngrok-ssh-notify.service` |
 | The Pi has no GitHub password or token; pushes use a deploy key | Pushes fail if the key is removed | Keep the key scoped to this repository (write access) |
 
 ## 9. Scope exclusions

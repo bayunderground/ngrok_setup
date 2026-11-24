@@ -39,14 +39,21 @@ def read_credentials(path):
     return token, chat_id
 
 
+def _stamp(now):
+    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
 def build_message(endpoint, user, now=None):
     host, _, port = endpoint.rpartition(":")
-    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
         "ngrok SSH endpoint changed\n"
         f"ssh -p {port} {user}@{host}\n"
-        f"{stamp}"
+        f"{_stamp(now)}"
     )
+
+
+def build_down_message(now=None):
+    return f"ngrok SSH tunnel is down\n{_stamp(now)}"
 
 
 def send_message(token, chat_id, text, opener=urllib.request.urlopen, sleep=time.sleep):

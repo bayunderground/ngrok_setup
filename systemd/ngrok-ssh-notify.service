@@ -1,5 +1,5 @@
 [Unit]
-Description=Announce ngrok SSH endpoint changes over Telegram
+Description=Publish ngrok SSH endpoint changes to the remote file (and Telegram if configured)
 After=network-online.target ngrok-ssh.service
 Wants=network-online.target
 

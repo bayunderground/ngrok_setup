@@ -76,14 +76,14 @@ class ChangeDetectionTests(unittest.TestCase):
 
 class StatePathTests(unittest.TestCase):
     def test_env_override_wins(self):
-        os.environ["NGROK_SSH_STATE"] = "/tmp/x/last"
+        os.environ["NGROK_SSH_STATE_DIR"] = "/tmp/x"
         try:
-            self.assertEqual(state.state_path(), Path("/tmp/x/last"))
+            self.assertEqual(state.state_path("last_remote"), Path("/tmp/x/last_remote"))
         finally:
-            del os.environ["NGROK_SSH_STATE"]
+            del os.environ["NGROK_SSH_STATE_DIR"]
 
     def test_default_is_under_home_state_dir(self):
-        self.assertEqual(state.state_path(), state.DEFAULT_STATE)
+        self.assertEqual(state.state_path("last_endpoint"), state.DEFAULT_DIR / "last_endpoint")
 
 
 if __name__ == "__main__":
