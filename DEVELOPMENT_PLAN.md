@@ -94,7 +94,7 @@ Existing dispatcher caveat: `90-android-vpn-share` matches `wlp8s0` and `tun0`, 
 | Watchdog | same script, `--watchdog` | Every 60 s: sets the request flag if a route exists but no endpoint is up |
 | Notifier | `scripts/ngrok_notify_check.py`, `ngrok_notify_remote.py`, `ngrok_notify_state.py`, `ngrok_notify_telegram.py`, `systemd/ngrok-ssh-notify.{service,timer}` | Publishes the endpoint, or `ngrok tunnel is down`, to the remote file when the value changes; Telegram too when configured. Each channel has its own state |
 | Setup | `setup.sh` | `check`, `status`, `install`, `uninstall`; `--dry-run`, `--user`; test hooks via `NGROK_SSH_ROOT` |
-| Tests | `tests/` | 58 unit tests (unittest), run on the Pi |
+| Tests | `tests/` | 84 unit tests (unittest), run on the Pi and locally |
 
 ### 5.2 Installed layout
 
@@ -160,6 +160,12 @@ Status legend: **Pass** = executed, result recorded. **Fail** = executed, did no
 | Telegram sender (0600 credential check, bounded retries, no token in args) | Pass (unit tests; live send delivered) |
 | Notifier: first announcement, unchanged, changed | Pass (live: announced, unchanged; after recovery change: announced) |
 | Secrets not in argv, logs, or status output | Pass (reviewed; `status` prints no credentials) |
+| Remote endpoint file over SSH: one line, mode 600, root-owned, atomic (2026-11-24) | Pass (live on `pi5home` with a throwaway file, then removed; live `ngrok_notify_check` run wrote the current endpoint) |
+| Notifier publishes on first run after install | Pass (live: `remote: published`, `telegram: unchanged`) |
+| Tunnel-down line written when tunnel is down | Pass (unit tests); not run live (needs a tunnel stop, which needs explicit go-ahead) |
+| Endpoint change written to the file | Pass (unit tests); not run live (needs an agent restart, which needs explicit go-ahead) |
+| Failed remote write is not recorded and retried next run | Pass (unit tests) |
+| Telegram optional (off without `telegram.env`; invalid credentials reported, not fatal; independent state) | Pass (unit tests) |
 
 ### Phase 3 — Network and VPN recovery
 
@@ -179,7 +185,7 @@ Status legend: **Pass** = executed, result recorded. **Fail** = executed, did no
 |---|---|
 | `check`: OS, arch, systemd, NetworkManager, user, ngrok, project files | Pass (on the Pi; wrong OS/arch fail clearly) |
 | `status` | Pass |
-| `install`: runs `check`, verifies units, atomic file placement, creates credentials, enables units | Pass (real install on the Pi; fake-root tests) |
+| `install`: runs `check`, verifies units, atomic file placement, creates credentials, enables units | Pass (real install on the Pi; fake-root tests; re-run 2026-11-24 with the remote publisher, `check` passed, existing `telegram.env` kept) |
 | Second install is idempotent and keeps credentials | Pass (fake-root test) |
 | `--dry-run` writes nothing | Pass (fake-root test) |
 | `uninstall`: removes only project files; keeps credentials and state; keeps edited dispatcher | Pass (fake-root tests) |
