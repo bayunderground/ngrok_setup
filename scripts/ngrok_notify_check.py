@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Publish the ngrok SSH endpoint, or a tunnel-down marker, when it changes.
 
-The remote file is the primary channel. Telegram is optional and is enabled
-only when its credentials file exists. Each channel keeps its own state, so a
+The remote file is the primary channel. Telegram is a backup channel, off unless
+its credentials file sets TELEGRAM_ENABLED=1. Each channel keeps its own state, so a
 failure in one channel does not repeat or block the other.
 """
 import importlib.util
@@ -79,6 +79,8 @@ def build_channels(user, creds):
     if not creds.exists():
         return channels, None
     try:
+        if not telegram.is_enabled(creds):
+            return channels, None
         token, chat_id = telegram.read_credentials(creds)
     except telegram.CredentialError as exc:
         return channels, str(exc)

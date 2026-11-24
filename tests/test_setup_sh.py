@@ -83,13 +83,14 @@ class SetupScriptTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(os.stat(lib / "scripts/ngrok_recover.py").st_mode), 0o755)
         self.assertEqual(stat.S_IMODE(os.stat(lib / "config/ngrok-ssh.yml").st_mode), 0o644)
 
-    def test_install_creates_private_telegram_env_with_only_telegram_keys(self):
+    def test_install_creates_private_telegram_env_disabled_by_default(self):
         result = self.run_setup("install")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         dest = self.home / ".config/ngrok-ssh/telegram.env"
         self.assertEqual(stat.S_IMODE(os.stat(dest).st_mode), 0o600)
         keys = [line.split("=", 1)[0] for line in dest.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual(keys, ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"])
+        self.assertEqual(keys, ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_ENABLED"])
+        self.assertIn("TELEGRAM_ENABLED=0", dest.read_text(encoding="utf-8").splitlines())
 
     def test_reinstall_is_idempotent_and_keeps_credentials(self):
         self.run_setup("install")

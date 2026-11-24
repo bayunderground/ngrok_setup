@@ -116,15 +116,24 @@ class BuildChannelsTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual([c.name for c in channels], ["remote"])
 
-    def test_telegram_added_when_credentials_present(self):
-        self.creds.write_text("TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\n", encoding="utf-8")
+    def test_telegram_added_when_enabled(self):
+        self.creds.write_text("TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nTELEGRAM_ENABLED=1\n", encoding="utf-8")
         os.chmod(self.creds, 0o600)
         channels, error = check.build_channels("bliss", self.creds)
         self.assertIsNone(error)
         self.assertEqual([c.name for c in channels], ["remote", "telegram"])
 
+    def test_telegram_off_when_disabled_or_switch_missing(self):
+        for content in ("TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nTELEGRAM_ENABLED=0\n",
+                        "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\n"):
+            self.creds.write_text(content, encoding="utf-8")
+            os.chmod(self.creds, 0o600)
+            channels, error = check.build_channels("bliss", self.creds)
+            self.assertIsNone(error)
+            self.assertEqual([c.name for c in channels], ["remote"])
+
     def test_invalid_telegram_credentials_are_reported_not_fatal(self):
-        self.creds.write_text("TELEGRAM_CHAT_ID=1\n", encoding="utf-8")
+        self.creds.write_text("TELEGRAM_CHAT_ID=1\nTELEGRAM_ENABLED=1\n", encoding="utf-8")
         os.chmod(self.creds, 0o600)
         channels, error = check.build_channels("bliss", self.creds)
         self.assertEqual([c.name for c in channels], ["remote"])

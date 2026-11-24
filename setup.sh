@@ -207,8 +207,9 @@ ensure_telegram_env() {
     (
         umask 077
         grep -E '^TELEGRAM_(BOT_TOKEN|CHAT_ID)=' "$PROJECT_DIR/.env" > "$dest.new" || true
+        echo "TELEGRAM_ENABLED=0" >> "$dest.new"
     )
-    if [[ "$(wc -l < "$dest.new")" -ne 2 ]]; then
+    if [[ "$(wc -l < "$dest.new")" -ne 3 ]]; then
         rm -f "$dest.new"
         echo "error: .env must define TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID" >&2
         return 1
@@ -217,7 +218,7 @@ ensure_telegram_env() {
     if ! is_test_root; then
         chown "$TARGET_USER:$TARGET_USER" "$dest"
     fi
-    echo "created $dest (mode 600)"
+    echo "created $dest (mode 600, Telegram disabled: TELEGRAM_ENABLED=0)"
 }
 
 verify_units() {

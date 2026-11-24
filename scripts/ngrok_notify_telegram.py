@@ -21,7 +21,7 @@ class SendError(Exception):
     pass
 
 
-def read_credentials(path):
+def _read_values(path):
     mode = stat.S_IMODE(path.stat().st_mode)
     if mode & 0o077:
         raise CredentialError(f"{path} must not be readable by group or others (mode {oct(mode)})")
@@ -32,6 +32,17 @@ def read_credentials(path):
             continue
         key, _, value = line.partition("=")
         values[key.strip()] = value.strip()
+    return values
+
+
+def is_enabled(path):
+    if not path.exists():
+        return False
+    return _read_values(path).get("TELEGRAM_ENABLED") == "1"
+
+
+def read_credentials(path):
+    values = _read_values(path)
     token = values.get("TELEGRAM_BOT_TOKEN")
     chat_id = values.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:

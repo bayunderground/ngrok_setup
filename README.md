@@ -1,6 +1,6 @@
 # ngrok SSH tunnel for pi5home
 
-Exposes SSH on a Raspberry Pi through an ngrok TCP endpoint and recovers after reboots, network changes, and Happ VPN transitions. The endpoint is random on the free ngrok plan and can change, so the current address is written to a file on `root@vdsn2` whenever it changes. An optional Telegram message can announce the same change.
+Exposes SSH on a Raspberry Pi through an ngrok TCP endpoint and recovers after reboots, network changes, and Happ VPN transitions. The endpoint is random on the free ngrok plan and can change, so the current address is written to a file on `root@vdsn2` whenever it changes. Telegram is a backup channel for the same change. It is disabled by default.
 
 Design and phases: see `DEVELOPMENT_PLAN.md`. Agent rules: see `CLAUDE.md`.
 
@@ -14,7 +14,7 @@ For a user guide in Russian (how to connect, what to do when the address changes
 - A working ngrok config for the service user, at `~/.config/ngrok/ngrok.yml`, containing a valid authtoken. Check it with `ngrok config check`.
 - OpenSSH server listening on port 22, with key-based authentication. Password login is allowed only for user `bliss` (`Match User bliss` at the end of `/etc/ssh/sshd_config`). Global `PasswordAuthentication` stays `no`. Because SSH is publicly reachable through ngrok, use a strong password for `bliss`.
 - SSH key login from the service user to `root@vdsn2` (key already registered on vdsn2, host key already in `known_hosts`). The Pi writes the endpoint file there with `BatchMode`, so no password prompt can appear.
-- Optional: a Telegram bot token and chat ID in `.env` (see `.env.example`). `.env` must never be committed.
+- Optional, disabled by default: a Telegram bot token and chat ID in `.env` (see `.env.example`). `.env` must never be committed.
 
 ## Installation
 
@@ -31,7 +31,7 @@ sudo ./setup.sh install                # install and enable
 - copies scripts to `/usr/local/lib/ngrok-ssh/` and the ngrok config to `/usr/local/lib/ngrok-ssh/config/`;
 - installs the systemd units to `/etc/systemd/system/`;
 - installs the NetworkManager dispatcher hook to `/etc/NetworkManager/dispatcher.d/50-ngrok-ssh`;
-- creates `~/.config/ngrok-ssh/telegram.env` (mode 600) from the `TELEGRAM_*` keys in `.env`, only if it does not already exist and `.env` has them. Without them the Telegram channel stays off;
+- creates `~/.config/ngrok-ssh/telegram.env` (mode 600) from the `TELEGRAM_*` keys in `.env`, only if it does not already exist and `.env` has them. It sets `TELEGRAM_ENABLED=0`, so Telegram stays off;
 - adds a managed `Match User bliss` block with `PasswordAuthentication yes` to the end of `/etc/ssh/sshd_config` (backup at `sshd_config.bak-ngrok-ssh`, validated with `sshd -t`, then `ssh` is reloaded). Other users keep password login off;
 - enables `ngrok-ssh.service`, `ngrok-ssh-recover.timer`, and `ngrok-ssh-notify.timer`.
 
@@ -42,6 +42,7 @@ The service user defaults to `bliss`. Use `--user NAME` to change it.
 ## Configuration
 
 - `.env` (optional): Telegram credentials, read only at install time. Copied to `~/.config/ngrok-ssh/telegram.env`.
+- Telegram backup channel: enabled only when `~/.config/ngrok-ssh/telegram.env` contains `TELEGRAM_ENABLED=1`. To enable it, set that line to `1` (no restart needed; the next timer run picks it up). To disable it again, set it to `0`. Credentials are kept either way.
 - `config/ngrok-ssh.yml`: the TCP endpoint definition (forwards to `127.0.0.1:22`). Layered on top of the user's ngrok config.
 - Remote endpoint file: `scripts/ngrok_notify_remote.py` writes to `/root/pi5home_ngrok_endpoint.txt` on `root@vdsn2` via `ssh` (the host and path are constants in that file).
 - `NGROK_SSH_ENV`, `NGROK_SSH_USER`, `NGROK_SSH_STATE_DIR`: environment overrides used by the notify job.
@@ -114,7 +115,7 @@ ssh -p PORT bliss@HOST                       # from the endpoint printed above
 
 - The NetworkManager dispatcher hook records `up`, `down`, `vpn-up`, `vpn-down`, `connectivity-change`, and `dhcp4-change` events. It never restarts ngrok and does not depend on interface names.
 - `ngrok-ssh-recover.timer` runs every minute. If a default route exists but no endpoint is up, it requests recovery. A recovery run acts only after events have settled for 5 seconds, takes a lock, and restarts the agent only when no endpoint is up. It does nothing while `ngrok-ssh.service` is disabled.
-- `ngrok-ssh-notify.timer` runs every minute. It publishes the endpoint, or `ngrok tunnel is down`, to the remote file only when the value changes, and to Telegram too if it is configured. A failed write is retried on the next run, and a failure in one channel does not affect the other.
+- `ngrok-ssh-notify.timer` runs every minute. It publishes the endpoint, or `ngrok tunnel is down`, to the remote file only when the value changes, and to Telegram too if that backup channel is enabled. A failed write is retried on the next run, and a failure in one channel does not affect the other.
 
 ## Troubleshooting
 
@@ -122,7 +123,7 @@ ssh -p PORT bliss@HOST                       # from the endpoint printed above
 - `check` fails on ngrok: install ngrok and run `ngrok config check` as the service user.
 - `status` shows `state=down`: the agent is not running or has no endpoint. Look at `journalctl -u ngrok-ssh.service`.
 - Remote file not updating: run `ssh -o BatchMode=yes root@vdsn2 true` as the service user and check `journalctl -u ngrok-ssh-notify.service`. The unit prints `remote: failed (...)` with the ssh error.
-- Telegram not announcing: check `~/.config/ngrok-ssh/telegram.env` permissions (600) and `journalctl -u ngrok-ssh-notify.service`.
+- Telegram not announcing: check that `TELEGRAM_ENABLED=1` is set in `~/.config/ngrok-ssh/telegram.env`, its permissions are 600, and read `journalctl -u ngrok-ssh-notify.service`. Telegram is off by default, so silence is expected unless you enabled it.
 
 ## Update
 
